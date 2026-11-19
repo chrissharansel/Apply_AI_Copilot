@@ -11,24 +11,49 @@ export default function Apply() {
 function Start() {
   const nav = useNavigate();
   const [url, setUrl] = useState("");
+  const [notes, setNotes] = useState("");
+  const [resumes, setResumes] = useState([]);
+  const [resumeId, setResumeId] = useState("");
+  const [show, setShow] = useState(true);
+  const [ai, setAi] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [recent, setRecent] = useState([]);
-  useEffect(() => { api.get("/agent/sessions").then(setRecent).catch(() => {}); }, []);
+  useEffect(() => {
+    api.get("/agent/sessions").then(setRecent).catch(() => {});
+    api.get("/resumes").then((r) => { setResumes(r); setResumeId(r.find((x) => x.active)?.id || ""); }).catch(() => {});
+    api.get("/settings").then((x) => setShow(x.show_browser)).catch(() => {});
+  }, []);
   const go = async (e) => {
     e.preventDefault(); setErr(""); setBusy(true);
-    try { const r = await api.post("/agent/sessions", { url }); nav(`/apply/${r.id}`); }
-    catch (e2) { setErr(e2.message); setBusy(false); }
+    try {
+      const r = await api.post("/agent/sessions", { url, notes, resume_id: resumeId || null, show_browser: show, ai_answers: ai || null });
+      nav(`/apply/${r.id}`);
+    } catch (e2) { setErr(e2.message); setBusy(false); }
   };
   return (
     <div className="page narrow">
       <h1>Apply to a job</h1>
-      <form onSubmit={go} className="urlbar">
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://company.com/careers/apply/software-developer" required autoFocus />
-        <button className="primary" disabled={busy}>{busy ? "Starting…" : "Start"}</button>
+      <form onSubmit={go}>
+        <div className="urlbar">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://company.com/careers/apply/software-developer" required autoFocus />
+          <button className="primary" disabled={busy}>{busy ? "Starting…" : "Start"}</button>
+        </div>
+        <details className="opts">
+          <summary>Options for this application</summary>
+          <div className="grid2">
+            <label className="fld"><span>Resume to use</span>
+              <select value={resumeId} onChange={(e) => setResumeId(e.target.value)}>{resumes.map((r) => <option key={r.id} value={r.id}>v{r.version}: {r.filename}</option>)}</select></label>
+            <label className="fld"><span>Free-text questions (“Why us?”)</span>
+              <select value={ai} onChange={(e) => setAi(e.target.value)}><option value="">Use my default</option><option value="auto">AI drafts them (I review)</option><option value="ask">I write them (AI can draft on request)</option></select></label>
+          </div>
+          <label className="fld"><span>Notes for the AI about this job (optional)</span>
+            <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Emphasise my backend and Python work; mention I’m open to hybrid." /></label>
+          <label className="inline"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Show the browser window (needed if you may have to solve a CAPTCHA or log in)</label>
+        </details>
       </form>
       {err && <p className="error">{err}</p>}
-      <p className="muted">A browser window opens on your computer so you can watch, and step in for logins or CAPTCHAs. The agent never submits without your approval.</p>
+      <p className="muted">The agent reads the form, fills what it reliably knows, and asks you about the rest. It never submits without your approval.</p>
       {recent.length > 0 && <>
         <h2>Recent sessions</h2>
         <ul className="plain">{recent.slice(0, 6).map((s) => (
@@ -58,10 +83,13 @@ function Session({ id }) {
         </div>
         <div className="row"><StatusChip status={s.status} />
           {s.resumable && <button onClick={() => act("resume")}>Resume</button>}
+          {s.status === "In Progress" && s.running && <button onClick={() => act("pause")} title="Take over the browser; I'll pick up from the page as you leave it">Pause</button>}
+          {s.status === "Paused" && <button className="primary" onClick={() => act("continue")}>Continue</button>}
           {!["Submitted", "Cancelled", "Failed"].includes(s.status) && <button className="danger" onClick={() => act("cancel")}>Cancel</button>}
         </div>
       </div>
       <div className="bar"><i style={{ width: `${s.progress || 0}%` }} /></div>
+      {s.stepper && <p className="muted small">The site’s form: step {s.stepper.cur} of {s.stepper.total}</p>}
       {s.error && <p className="notice bad">{s.error}</p>}
       {s.status === "Submitted" && <p className="notice good">Submitted. {s.confirmation}</p>}
       {err && <p className="error">{err}</p>}
@@ -137,6 +165,11 @@ function QuestionCard({ q, sid, reload }) {
   };
   if (q.manual) return <div className="qcard"><button className="primary" disabled={busy} onClick={() => send({ action: "done" })}>Done, continue</button>{err && <p className="error">{err}</p>}</div>;
 
+  const canDraft = ["text", "textarea", "richtext"].includes(q.kind) && !q.sensitive && !q.options.length;
+  const draft = async () => {
+    setBusy(true); setErr("");
+    try { const r = await api.post(`/agent/sessions/${sid}/draft`, { qid: q.qid }); setVal(r.text); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
   const has = multi ? val.length > 0 : String(val).trim() !== "";
   const shown = multi ? val.join(", ") : val;
   if (stage === "save") return (
@@ -161,10 +194,11 @@ function QuestionCard({ q, sid, reload }) {
       ) : (
         <div className="row wrap">{q.options.slice(0, 8).map((o) => <button key={o} className={val === o ? "on" : ""} onClick={() => setVal(o)}>{o}</button>)}
           {q.options.length > 8 && <select value={val} onChange={(e) => setVal(e.target.value)}><option value="">More options…</option>{q.options.map((o) => <option key={o}>{o}</option>)}</select>}</div>
-      )) : q.kind === "textarea" ? <textarea rows={4} value={val} onChange={(e) => setVal(e.target.value)} placeholder="Your answer" />
+      )) : ["textarea", "richtext"].includes(q.kind) ? <textarea rows={4} value={val} onChange={(e) => setVal(e.target.value)} placeholder="Your answer" />
         : <input type={q.kind === "date" ? "date" : "text"} value={val} onChange={(e) => setVal(e.target.value)} placeholder="Your answer" />}
       <div className="row">
         <button className="primary" disabled={!has} onClick={() => setStage("save")}>Continue</button>
+        {canDraft && <button disabled={busy} onClick={draft}>Draft with AI</button>}
         {q.can_skip && <button disabled={busy} onClick={() => send({ action: "skip" })}>Skip</button>}
       </div>{err && <p className="error">{err}</p>}
     </div>
@@ -183,6 +217,7 @@ function Review({ s, reload }) {
     try { await api.post(`/agent/sessions/${s.id}/approve`, { edits }); reload(); } catch (e) { setErr(e.message); setBusy(false); }
   };
   const cancel = async () => { await api.post(`/agent/sessions/${s.id}/cancel`); reload(); };
+  const handoff = async () => { try { await api.post(`/agent/sessions/${s.id}/handoff`); reload(); } catch (e) { setErr(e.message); } };
   const control = (i) => {
     const v = edits[i.sk] ?? (i.value ?? "");
     const on = (x) => setEdits({ ...edits, [i.sk]: x });
@@ -208,6 +243,7 @@ function Review({ s, reload }) {
       {err && <p className="error">{err}</p>}
       <div className="row">
         <button className="primary" disabled={busy} onClick={approve}>Approve and submit</button>
+        <button disabled={busy} onClick={handoff} title="Leave the filled form open so you can press the site’s submit button yourself">I’ll submit it myself</button>
         <button className="danger" onClick={cancel}>Cancel application</button>
       </div>
       <Snapshot id={s.id} />

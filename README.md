@@ -22,6 +22,25 @@ npm install && npm run dev                             # http://localhost:5173
 ```
 Tests: `cd backend && SECRET_KEY=test-secret-key-123456 pytest`.
 
+## What the form engine does
+
+1. **Smart detection.** Every field is identified from all its signals, strongest first: `autocomplete` attribute, visible label, aria-label, placeholder, `name`/`id`, hint text and section heading. Shadow DOM and iframes are searched too.
+2. **Semantic mapping.** "Mobile Number", "Contact No.", `name="phone_number"` and `autocomplete="tel"` all resolve to your phone. Fields about someone else (referrer, reference, emergency contact) are never filled with your data. Anything the rules can't place goes to one batched LLM classification call; if still unknown, it asks you.
+3. **Controls.** Text, masked inputs (phone formats), native and multi-selects, radios, checkboxes, ARIA radios/checkboxes/switches, searchable dropdowns (React-Select/MUI style: opens the menu, reads the choices, types to filter, picks, verifies), date pickers (reads `DD/MM/YYYY`-style hints and formats accordingly), contenteditable rich text, file uploads. Every write is read back and verified; failures are flagged, never silently ignored.
+4. **Dynamic forms.** After filling, the page is re-observed (up to 6 passes per step); newly revealed fields are planned and filled without restarting. If React re-renders a node, the field is re-found by meaning and retried.
+5. **Multi-page.** Next / Continue / Save & continue / Review are recognised; Back, Skip, Save draft and "Continue with Google/LinkedIn" are ignored. The site's own "Step 2 of 5" drives the progress bar. Optional step-by-step mode waits for you after every page.
+
+## Resume links (LinkedIn / GitHub / portfolio)
+
+Clickable labels like "LinkedIn" keep their URL in the PDF's link annotations or the DOCX hyperlink relationships, not in the visible text. These are now read directly (including DOCX headers, footers, tables and text boxes) and classified by domain, and they override anything the LLM guessed. Press **Fetch links from my resume** on the Profile page for an already-uploaded resume (no AI involved), or **Re-read** to re-extract everything.
+
+## Flexibility
+
+- **Settings:** AI drafts vs. you write free-text answers (with *Draft with AI* on any question), tone, length, standing writing instructions, step-by-step mode, similar-question reuse on/off, show/hide browser.
+- **Per application:** choose the resume, add job-specific notes for the AI, override visibility and AI mode.
+- **Pause and take over** the browser at any time; your manual edits are never overwritten when you continue.
+- **"I'll submit it myself"** at review: the agent leaves the filled form open and does not submit.
+
 ## How the work is split
 
 | Component | Does | Never does |
@@ -65,7 +84,8 @@ Each LLM call is one headless run: `copilot -s` with the prompt on stdin, JSON b
 
 ## Known limits (be aware)
 
-- Custom widgets (React-Select style comboboxes, drag-drop uploaders) are best-effort; failed verification is flagged and left for you in the browser.
+- Tested in real Chromium against a synthetic form with the widgets above (`backend/tests/e2e`), not against live company sites, which vary a lot. Failed verification is flagged and left for you in the browser.
+- Not supported yet: repeating sections ("Add another job"), button-style Yes/No groups with no ARIA roles, address autocomplete widgets, and canvas/PDF-style forms. Async-search dropdowns are best effort.
 - Edits in the review screen apply to the *current* step only; edit earlier steps directly in the browser window.
 - After a server restart a session’s browser is gone: press **Resume**. Saved answers are kept, nothing is re-asked.
 - Keep the browser window visible (`HEADLESS=false`) so you can solve CAPTCHAs/logins. Many sites’ terms prohibit automation; you are responsible for using it appropriately.

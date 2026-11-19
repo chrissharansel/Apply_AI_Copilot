@@ -7,6 +7,7 @@ import Apply from "./pages/Apply.jsx";
 import Profile from "./pages/Profile.jsx";
 import Knowledge from "./pages/Knowledge.jsx";
 import History from "./pages/History.jsx";
+import Settings from "./pages/Settings.jsx";
 
 function Shell() {
   const nav = useNavigate();
@@ -23,6 +24,7 @@ function Shell() {
           <NavLink to="/profile">Profile</NavLink>
           <NavLink to="/knowledge">Saved answers</NavLink>
           <NavLink to="/history">History</NavLink>
+          <NavLink to="/settings">Settings</NavLink>
         </nav>
         <div className="who"><span>{user?.name}</span><button className="link" onClick={out}>Sign out</button></div>
       </aside>
@@ -44,6 +46,7 @@ export default function App() {
         <Route path="profile" element={<Profile />} />
         <Route path="knowledge" element={<Knowledge />} />
         <Route path="history" element={<History />} />
+        <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

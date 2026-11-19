@@ -1,0 +1,52 @@
+<!doctype html><html><body style="font-family:sans-serif">
+<header><input placeholder="Search jobs" name="q"></header>
+<div id="step1">
+<h2>Step 1 of 2</h2>
+<form onsubmit="return false">
+ <div class="form-group"><label>Resume/CV *</label><input type="file" id="cv"></div>
+ <div class="form-group"><label for="a">Given name *</label><input id="a" name="x1" autocomplete="given-name"></div>
+ <div class="form-group"><label for="b">Surname</label><input id="b" name="x2"></div>
+ <div class="form-group"><label for="c">Mobile Number *</label><input id="c" type="tel" oninput="this.value=this.value.replace(/\D/g,'').replace(/(\d{2})(\d{5})(\d{0,5})/,'+$1 $2 $3').trim()"></div>
+ <div class="form-group"><label for="d">E-mail address</label><input id="d" type="email"></div>
+ <div class="form-group"><label>Your LinkedIn profile</label><input name="li" placeholder="https://linkedin.com/in/..."></div>
+ <div class="form-group"><label for="e">Contact</label><input id="e" name="github_url" placeholder="GitHub link"></div>
+ <div class="form-group"><label for="cty">Country *</label>
+   <div class="select__control"><div class="select__value-container"><div class="select__singleValue"></div><input id="cty" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" autocomplete="off" style="width:160px"></div></div></div>
+ <div class="form-group"><span id="lblw">Work mode *</span><div role="combobox" aria-haspopup="listbox" aria-labelledby="lblw" id="mui" tabindex="0" style="border:1px solid #888;padding:4px;width:160px">Select…</div></div>
+ <fieldset><legend>Preferred shift *</legend>
+   <div role="radiogroup" aria-label="Preferred shift"><div role="radio" aria-checked="false" tabindex="0">Day</div><div role="radio" aria-checked="false" tabindex="0">Night</div></div></fieldset>
+ <div class="form-group"><span id="sw">Open to relocation switch</span><div role="switch" aria-checked="false" aria-labelledby="sw" tabindex="0" id="swi" style="border:1px solid #888;width:40px;height:20px"></div></div>
+ <div class="form-group"><label for="ms">Skills you want to highlight</label><select id="ms" multiple><option value="py">Python</option><option value="go">Go</option><option value="js">JavaScript</option></select></div>
+ <div class="form-group"><label for="dt">Available from</label><input id="dt" placeholder="DD/MM/YYYY"></div>
+ <div class="form-group"><label for="ref">Were you referred by someone?</label><select id="ref"><option value="">Select...</option><option value="y">Yes</option><option value="n">No</option></select></div>
+ <div id="refwrap"></div>
+ <div class="form-group"><label id="rt">Cover note</label><div contenteditable="true" role="textbox" aria-labelledby="rt" id="rte" style="border:1px solid #888;min-height:60px"></div></div>
+ <div class="form-group"><label for="sh">Reference email</label><input id="sh" name="email" type="email"></div>
+ <fieldset><legend>Are you legally authorized to work in the US? *</legend><label><input type=radio name=auth value=y> Yes</label><label><input type=radio name=auth value=n> No</label></fieldset>
+ <div id="host"></div>
+ <button type="button" id="next">Save and continue</button> <button type="button">Back</button> <a href="#">Continue with Google</a>
+</form></div>
+<div id="step2" hidden><h2>Step 2 of 2</h2><form><label for="q2">Why do you want to join us?</label><textarea id="q2"></textarea><button type="button" id="sub">Submit application</button></form></div>
+<script>
+const mkList=(opts,onpick)=>{const ul=document.createElement('ul');ul.setAttribute('role','listbox');ul.style.cssText='position:absolute;background:#fff;border:1px solid #888;list-style:none;margin:0;padding:0;z-index:9';opts.forEach(o=>{const li=document.createElement('li');li.setAttribute('role','option');li.textContent=o;li.style.padding='4px 8px';li.onmousedown=e=>{e.preventDefault();onpick(o)};ul.appendChild(li)});return ul};
+// react-select style
+const cty=document.getElementById('cty'); const COUNTRIES=['India','United States','United Kingdom','Germany']; let menu=null;
+function openCty(){close();const q=cty.value.toLowerCase();menu=mkList(COUNTRIES.filter(c=>c.toLowerCase().includes(q)),o=>{document.querySelector('.select__singleValue').textContent=o;cty.value='';close()});const r=cty.getBoundingClientRect();menu.style.left=r.left+'px';menu.style.top=(r.bottom+window.scrollY)+'px';document.body.appendChild(menu)}
+function close(){if(menu){menu.remove();menu=null}}
+cty.addEventListener('click',openCty);cty.addEventListener('focus',openCty);cty.addEventListener('input',openCty);cty.addEventListener('blur',()=>setTimeout(close,150));
+cty.addEventListener('keydown',e=>{if(e.key==='Escape')close();if(e.key==='Enter'&&menu&&menu.firstChild){menu.firstChild.onmousedown({preventDefault(){}})}});
+// MUI style
+const mui=document.getElementById('mui'); let m2=null;
+mui.addEventListener('click',()=>{if(m2){m2.remove();m2=null;return}m2=mkList(['Remote','Hybrid','On-site'],o=>{mui.textContent=o;m2.remove();m2=null});const r=mui.getBoundingClientRect();m2.style.left=r.left+'px';m2.style.top=(r.bottom+window.scrollY)+'px';document.body.appendChild(m2)});
+mui.addEventListener('keydown',e=>{if(e.key==='Escape'&&m2){m2.remove();m2=null}});
+// aria radios + switch
+document.querySelectorAll('[role=radio]').forEach(r=>r.onclick=()=>{document.querySelectorAll('[role=radio]').forEach(x=>x.setAttribute('aria-checked','false'));r.setAttribute('aria-checked','true')});
+const sw=document.getElementById('swi'); sw.onclick=()=>sw.setAttribute('aria-checked',sw.getAttribute('aria-checked')==='true'?'false':'true');
+// conditional field
+document.getElementById('ref').onchange=e=>{document.getElementById('refwrap').innerHTML=e.target.value==='y'?'<div class="form-group"><label for="rn">Referrer full name</label><input id="rn"></div>':''};
+// shadow dom
+const sr=document.getElementById('host').attachShadow({mode:'open'});sr.innerHTML='<label for="zz">Postal code</label><input id="zz" name="zip">';
+// steps
+document.getElementById('next').onclick=()=>{document.getElementById('step1').hidden=true;document.getElementById('step2').hidden=false};
+document.getElementById('sub').onclick=()=>document.body.insertAdjacentHTML('beforeend','<p id="ok">Thank you for applying! Your application has been submitted.</p>');
+</script></body></html>

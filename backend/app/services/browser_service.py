@@ -1,4 +1,5 @@
 """Owns Playwright. One isolated context per agent session. Every request is checked against the SSRF policy."""
+import asyncio
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -10,15 +11,16 @@ from ..utils.validators import host_is_public
 class BrowserManager:
     def __init__(self) -> None:
         self.pw = None
-        self.browser = None
+        self.browsers: dict[bool, object] = {}              # headless flag -> browser (launched lazily)
         self.sessions: dict[str, tuple] = {}
 
-    async def _ensure(self) -> None:
-        if self.browser:
-            return
+    async def _ensure(self, headless: bool):
         from playwright.async_api import async_playwright
-        self.pw = await async_playwright().start()
-        self.browser = await self.pw.chromium.launch(headless=settings.headless)
+        if self.pw is None:
+            self.pw = await async_playwright().start()
+        if headless not in self.browsers:
+            self.browsers[headless] = await self.pw.chromium.launch(headless=headless)
+        return self.browsers[headless]
 
     async def _guard(self, route) -> None:
         url = route.request.url
@@ -29,14 +31,18 @@ class BrowserManager:
             return await route.abort("blockedbyclient")
         await route.continue_()
 
-    async def new_page(self, sid: str):
-        await self._ensure()
+    async def new_page(self, sid: str, headless: bool | None = None):
+        browser = await self._ensure(settings.headless if headless is None else headless)
         await self.close(sid)
-        ctx = await self.browser.new_context(viewport={"width": 1280, "height": 900}, service_workers="block",
+        ctx = await browser.new_context(viewport={"width": 1280, "height": 900}, service_workers="block",
                                              accept_downloads=False)
         await ctx.route("**/*", self._guard)
         page = await ctx.new_page()
         page.set_default_timeout(15000)
+
+        async def on_dialog(d):                              # never block on JS dialogs; confirm() is declined
+            await (d.accept() if d.type == "alert" else d.dismiss())
+        page.on("dialog", lambda d: asyncio.ensure_future(on_dialog(d)))
         self.sessions[sid] = (ctx, page)
         return page
 
@@ -68,11 +74,11 @@ class BrowserManager:
     async def shutdown(self) -> None:
         for sid in list(self.sessions):
             await self.close(sid)
-        if self.browser:
-            await self.browser.close()
+        for b in self.browsers.values():
+            await b.close()
         if self.pw:
             await self.pw.stop()
-        self.browser = self.pw = None
+        self.browsers, self.pw = {}, None
 
 
 bm = BrowserManager()

@@ -26,11 +26,24 @@ class Project(BaseModel):
     technologies: list[str] = []
 
 
+class Link(BaseModel):
+    label: str = ""
+    url: str = ""
+
+
 class ProfileData(BaseModel):
     full_name: str = ""
     email: str = ""
     phone: str = ""
     location: str = ""
+    city: str = ""
+    state: str = ""
+    country: str = ""
+    postal_code: str = ""
+    address: str = ""
+    summary: str = ""
+    languages: list[str] = []
+    other_links: list[Link] = []
     current_designation: str = ""
     total_experience_years: float | None = None
     education: list[Education] = []

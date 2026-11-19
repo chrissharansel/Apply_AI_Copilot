@@ -7,7 +7,9 @@ from ..agents.orchestrator import manager
 from ..config import settings
 from ..database.models import log_audit, new_id, now, public
 from ..database.mongodb import get_db
-from ..schemas.agent import AnswerIn, ApproveIn, StartSession
+from ..agents.answer_generator import generate_free_text
+from ..schemas.agent import AnswerIn, ApproveIn, DraftIn, StartSession
+from ..schemas.settings import UserSettings
 from ..services import application_service as apps
 from ..services import knowledge_service as kb
 from ..services.browser_service import bm
@@ -56,7 +58,8 @@ async def start(body: StartSession, user=Depends(current_user)):
     await db.agent_sessions.insert_one({
         "_id": sid, "user_id": uid, "url": url, "resume_id": resume["_id"], "application_id": aid,
         "status": "Pending", "state": "INIT", "progress": 0, "job": {}, "collected": {}, "pending_questions": [],
-        "results": [], "review": None, "approval": None, "step": 0, "error": None, "resumable": False,
+        "results": [], "review": None, "approval": None, "step": 0, "error": None, "resumable": False, "paused": False,
+        "options": {"notes": body.notes.strip(), "show_browser": body.show_browser, "ai_answers": body.ai_answers},
         "created_at": now(), "updated_at": now()})
     await log_audit(uid, "session_start", session_id=sid, host=url.split("/")[2])
     manager.launch(sid, uid)
@@ -167,3 +170,50 @@ async def screenshot(sid: str, user=Depends(current_user)):
     if not p.exists():
         raise HTTPException(404, "No snapshot yet")
     return FileResponse(p, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/sessions/{sid}/pause")
+async def pause(sid: str, user=Depends(current_user)):
+    s = await _own(sid, user["_id"])
+    if not manager.running(sid) or s["status"] != "In Progress":
+        raise HTTPException(409, "I can pause while I'm working (not while waiting for you).")
+    await get_db().agent_sessions.update_one({"_id": sid}, {"$set": {"paused": True}})
+    return {"ok": True}
+
+
+@router.post("/sessions/{sid}/continue")
+async def continue_(sid: str, user=Depends(current_user)):
+    await _own(sid, user["_id"])
+    await get_db().agent_sessions.update_one({"_id": sid}, {"$set": {"paused": False}})
+    return {"ok": True}
+
+
+@router.post("/sessions/{sid}/handoff")
+async def handoff(sid: str, user=Depends(current_user)):
+    """User wants to press the site's submit button themselves."""
+    s = await _own(sid, user["_id"])
+    if s["status"] != "Ready for Review" or not manager.running(sid):
+        raise HTTPException(409, "This application isn't waiting for review.")
+    await get_db().agent_sessions.update_one({"_id": sid}, {"$set": {"approval": {"approved": False, "handoff": True, "at": now()}}})
+    await _msg(s, "user", "I'll submit it myself.")
+    return {"ok": True}
+
+
+@router.post("/sessions/{sid}/draft")
+async def draft(sid: str, body: DraftIn, user=Depends(current_user)):
+    """On-demand AI draft for a question the agent asked; the user edits it and answers as usual."""
+    s = await _own(sid, user["_id"])
+    q = next((x for x in s.get("pending_questions", []) if x["qid"] == body.qid and x["status"] == "open"), None)
+    if not q or q["kind"] not in ("text", "textarea", "richtext") or q["sensitive"]:
+        raise HTTPException(400, "I can only draft non-sensitive free-text answers.")
+    db = get_db()
+    prof = await db.candidate_profiles.find_one({"user_id": user["_id"]})
+    u = await db.users.find_one({"_id": user["_id"]}) or {}
+    us = UserSettings(**(u.get("settings") or {})).model_dump()
+    opts = {"tone": us["tone"], "writing_notes": us["writing_notes"], "max_words": us["max_words"],
+            "job_notes": (s.get("options") or {}).get("notes", "")}
+    text = await generate_free_text(prof["data"], s.get("job") or {}, {"label": q["label"], "maxlength": q.get("maxlength")},
+                                    await kb.verified_facts(user["_id"]), opts)
+    if not text:
+        raise HTTPException(502, "I couldn't draft that right now. Try again, or write it yourself.")
+    return {"text": text}

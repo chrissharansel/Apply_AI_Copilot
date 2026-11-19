@@ -1,3 +1,4 @@
+import asyncio
 import shutil
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from ..config import settings
 from ..database.models import log_audit, new_id, now, public
 from ..database.mongodb import get_db
 from ..schemas.profile import ProfileData, ProfileUpdate
+from ..services.resume_service import classify_links, read_file
 from ..utils.security import current_user
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -45,6 +47,46 @@ async def from_resume(rid: str, user=Depends(current_user)):
         {"$set": {"data": r["parsed"], "confirmed": False, "confirmed_at": None, "source_resume_id": rid, "updated_at": now()},
          "$setOnInsert": {"_id": new_id(), "user_id": user["_id"]}}, upsert=True)
     return _out(await get_db().candidate_profiles.find_one({"user_id": user["_id"]}))
+
+
+@router.post("/refresh-links")
+async def refresh_links(overwrite: bool = False, user=Depends(current_user)):
+    """Pull LinkedIn/GitHub/portfolio/email from the clickable links inside the active resume (no AI involved).
+    Fills empty fields only; if the resume disagrees with what's in the profile it reports a conflict instead of overwriting."""
+    db = get_db()
+    r = await db.resumes.find_one({"user_id": user["_id"], "active": True})
+    if not r:
+        raise HTTPException(400, "Upload a resume first.")
+    text, links = await asyncio.to_thread(read_file, r)
+    await db.resumes.update_one({"_id": r["_id"]}, {"$set": {"links": links[:60]}})
+    c = classify_links(links, text)
+    prof = await db.candidate_profiles.find_one({"user_id": user["_id"]})
+    data = (prof or {}).get("data") or ProfileData().model_dump()
+    added, conflicts = [], {}
+    for k in ("linkedin", "github", "portfolio", "email", "phone"):
+        if not c[k]:
+            continue
+        if not data.get(k) or overwrite:
+            if data.get(k) != c[k]:
+                data[k] = c[k]
+                added.append(k)
+        elif data[k].rstrip("/").lower() != c[k].rstrip("/").lower():
+            conflicts[k] = c[k]
+    others = list(data.get("other_links") or [])
+    have = {o["url"].lower() for o in others} | {str(data.get(k, "")).lower() for k in ("linkedin", "github", "portfolio")}
+    for o in c["other_links"] + c["generic"]:
+        if o["url"].lower() not in have:
+            others.append(o)
+            have.add(o["url"].lower())
+            added.append(o["label"])
+    data["other_links"] = others[:15]
+    if added or not prof:
+        await db.candidate_profiles.update_one(
+            {"user_id": user["_id"]},
+            {"$set": {"data": data, "confirmed": False, "confirmed_at": None, "updated_at": now()},
+             "$setOnInsert": {"_id": new_id(), "user_id": user["_id"]}}, upsert=True)
+    return {"profile": _out(await db.candidate_profiles.find_one({"user_id": user["_id"]})), "added": added,
+            "conflicts": conflicts, "links_in_file": len(links)}
 
 
 @router.delete("/data")

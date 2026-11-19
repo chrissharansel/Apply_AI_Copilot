@@ -66,3 +66,69 @@ def test_lexical_matching_and_json_parsing():
     assert parse_json('```json\n{"a": 1}\n```') == {"a": 1}
     assert parse_json('Sure! Here you go: {"a": {"b": 2}} hope that helps') == {"a": {"b": 2}}
     assert parse_json("no json here") is None
+
+
+# ----------------------------------------------------------------------------- v2: links, semantic mapping, dates
+def _f(label="", **kw):
+    return {"id": "x", "kind": "text", "label": label, "required": False, "options": [], "name": "", "domid": "",
+            "placeholder": "", "ariaLabel": "", "autocomplete": "", "hint": "", "section": "", **kw}
+
+
+def test_semantic_phone_variants_all_map_to_phone():
+    from app.agents.form_analyzer import profile_key_for_field as k
+    assert k(_f("Mobile Number")) == k(_f("Contact Number")) == k(_f("Phone")) == "phone"
+    assert k(_f("", autocomplete="tel")) == "phone"
+    assert k(_f("", placeholder="Your WhatsApp no")) == "phone"
+    assert k(_f("Contact", name="phone_number")) == "phone"            # developer-chosen name
+    assert k(_f("Given name")) == "first_name" and k(_f("Surname")) == "last_name"
+
+
+def test_fields_about_other_people_are_not_filled_with_my_data():
+    from app.agents.form_analyzer import profile_key_for_field as k
+    assert k(_f("Referrer full name")) is None
+    assert k(_f("Reference email", name="email")) is None
+    assert k(_f("Emergency contact phone")) is None
+
+
+def test_dates():
+    from app.agents.answer_generator import date_format_from_hint, format_date, parse_date
+    assert date_format_from_hint("DD/MM/YYYY") == "%d/%m/%Y"
+    assert date_format_from_hint("mm-dd-yyyy") == "%m-%d-%Y"
+    assert date_format_from_hint("Pick a date") is None
+    assert format_date(parse_date("15 Jan 2027"), "%d/%m/%Y") == "15/01/2027"
+    assert parse_date("immediately") is None                           # never invent a date
+
+
+def test_classify_links_by_domain():
+    from app.services.resume_service import classify_links
+    c = classify_links([{"url": "https://www.linkedin.com/in/asha-rao-123/", "text": "LinkedIn"},
+                        {"url": "https://github.com/asharao", "text": "GitHub"},
+                        {"url": "https://github.com/asharao/shopfast", "text": "ShopFast"},
+                        {"url": "https://asha.dev", "text": "Portfolio"}, {"url": "mailto:a@b.co", "text": ""},
+                        {"url": "https://leetcode.com/asha", "text": ""}], "also see github.com/other-person")
+    assert c["linkedin"].endswith("/in/asha-rao-123") and c["github"] == "https://github.com/asharao"
+    assert c["portfolio"] == "https://asha.dev" and c["email"] == "a@b.co"
+    assert {o["label"] for o in c["other_links"]} >= {"ShopFast", "LeetCode"}
+
+
+def test_clickable_labels_in_pdf_and_docx_are_extracted(tmp_path):
+    """Regression: 'LinkedIn'/'GitHub' labels are hyperlinks; the URL is not in the visible text."""
+    from pathlib import Path
+    from app.services.resume_service import classify_links, extract
+    docx = pytest.importorskip("docx")
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    d = docx.Document()
+    p = d.sections[0].header.paragraphs[0]                              # contact info in the header
+    rid = p.part.relate_to("https://www.linkedin.com/in/asha-rao-123", RT.HYPERLINK, is_external=True)
+    h = OxmlElement("w:hyperlink"); h.set(qn("r:id"), rid)
+    r = OxmlElement("w:r"); t = OxmlElement("w:t"); t.text = "LinkedIn"; r.append(t); h.append(r); p._p.append(h)
+    d.add_paragraph("Senior engineer"); f = tmp_path / "r.docx"; d.save(str(f))
+    text, links = extract(Path(f), ".docx")
+    assert "linkedin.com" not in text and classify_links(links, text)["linkedin"].endswith("/in/asha-rao-123")
+
+    rl = pytest.importorskip("reportlab.pdfgen.canvas")
+    c = rl.Canvas(str(tmp_path / "r.pdf")); c.drawString(72, 744, "GitHub"); c.linkURL("https://github.com/asharao", (72, 740, 110, 754)); c.save()
+    text, links = extract(tmp_path / "r.pdf", ".pdf")
+    assert "github.com" not in text and links[0]["text"] == "GitHub" and classify_links(links, text)["github"] == "https://github.com/asharao"

@@ -60,3 +60,7 @@ ul.plain{list-style:none;padding:0}ul.plain li{padding:8px 0;border-bottom:1px s
 @media (max-width:900px){.shell{grid-template-columns:1fr}aside{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center}aside nav{flex-direction:row;flex-wrap:wrap}.who{margin:0 0 0 auto}
 .split,.login,.grid2{grid-template-columns:1fr}.page{padding:20px 16px}.chat{position:static}.figs{flex-wrap:wrap}.login{gap:20px;padding:30px 6vw}.login-copy h1{font-size:32px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+details.opts{margin:6px 0 14px;padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+details.opts summary{cursor:pointer;font-weight:600}details.opts[open] summary{margin-bottom:12px}
+input[type=range]{padding:0}

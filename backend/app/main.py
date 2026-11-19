@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .agents.orchestrator import recover_sessions
-from .api import agent, applications, auth, knowledge, profile, resume
+from .api import agent, applications, auth, knowledge, profile, resume, settings as settings_api
 from .config import settings
 from .database.mongodb import init_indexes
 from .services.browser_service import bm
@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="ApplyAI", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
                    allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
-for r in (auth, profile, resume, knowledge, applications, agent):
+for r in (auth, profile, resume, knowledge, applications, agent, settings_api):
     app.include_router(r.router, prefix="/api")
 
 
