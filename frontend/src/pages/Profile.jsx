@@ -36,11 +36,12 @@ export default function Profile() {
   const [resumes, setResumes] = useState([]);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [conf, setConf] = useState({});
   const file = useRef(null);
   const load = async () => { setP(await api.get("/profile")); setResumes(await api.get("/resumes")); };
   useEffect(() => { load().catch((e) => setErr(e.message)); }, []);
   if (!p) return <div className="page"><p className="muted">{err || "Loading…"}</p></div>;
-  const d = p.data;
+  const d = p.data || {};
   const set = (k, v) => setP({ ...p, data: { ...d, [k]: v } });
   const save = async (confirm) => {
     setErr(""); setMsg("");
@@ -53,7 +54,6 @@ export default function Profile() {
     try { const r = await api.upload("/resumes", f); await load(); setMsg(r.warning || "Resume added. Check the extracted details below, then confirm."); }
     catch (e2) { setErr(e2.message); setMsg(""); } finally { file.current.value = ""; }
   };
-  const [conf, setConf] = useState({});
   const fetchLinks = async (overwrite = false) => {
     setErr(""); setMsg("");
     try {
