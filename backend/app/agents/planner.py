@@ -151,7 +151,7 @@ class Planner:
             if self.opts["ai_answers"] == "auto":
                 if self._facts is None:
                     self._facts = await kb.verified_facts(self.uid)
-                txt = await generate_free_text(self.profile, self.job, f, self._facts, self.opts)
+                txt = await generate_free_text(self.profile, self.job, f, self._facts, self.opts, self.fmeta)
                 if txt:
                     return self._item(f, action="fill", source="ai_generated", value=txt, confidence=0.6, flags=["ai_generated", "needs_review"])
                 note = "I couldn't draft this one automatically"

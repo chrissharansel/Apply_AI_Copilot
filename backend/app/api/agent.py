@@ -226,7 +226,29 @@ async def draft(sid: str, body: DraftIn, user=Depends(current_user)):
     opts = {"tone": us["tone"], "writing_notes": us["writing_notes"], "max_words": us["max_words"],
             "job_notes": (s.get("options") or {}).get("notes", "")}
     text = await generate_free_text(prof["data"], s.get("job") or {}, {"label": q["label"], "maxlength": q.get("maxlength")},
-                                    await kb.verified_facts(user["_id"]), opts)
+                                    await kb.verified_facts(user["_id"]), opts,
+                                    prof.get("facts") or facts.migrate(prof))
     if not text:
         raise HTTPException(502, "I couldn't draft that right now. Try again, or write it yourself.")
     return {"text": text}
+
+
+class WorkbenchRunIn(BaseModel):
+    role: str = Field(default="applicant", pattern="^(applicant|developer)$")
+    task: str = Field(min_length=3, max_length=2000)
+    context: dict = Field(default_factory=dict)
+
+
+@router.get("/workbench/catalog")
+async def workbench_catalog(user=Depends(current_user)):
+    """Return registered agents and tools available to the signed-in user."""
+    return tool_registry.catalog()
+
+
+@router.post("/workbench/run")
+async def workbench_run(body: WorkbenchRunIn, user=Depends(current_user)):
+    """Dynamically route a task to an agent and execute validated registered tools."""
+    try:
+        return await tool_registry.run_workflow(user["_id"], body.role, body.task, body.context)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))

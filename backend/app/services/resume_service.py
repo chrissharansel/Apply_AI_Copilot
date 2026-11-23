@@ -38,6 +38,20 @@ SOCIAL = {"twitter.com": "Twitter", "x.com": "X", "leetcode.com": "LeetCode", "k
 PORTFOLIO_WORDS = re.compile(r"portfolio|website|web site|personal|blog|homepage|my site|visit", re.I)
 
 
+def infer_resume_job_type(text: str) -> str:
+    t = (text or "").lower()
+    if any(x in t for x in ("machine learning", "data scientist", "data engineer", "llm engineer", "ai engineer", "analytics")):
+        return "data_ai"
+    if any(x in t for x in ("devops", "cloud engineer", "site reliability", "kubernetes")):
+        return "devops_cloud"
+    if any(x in t for x in ("qa engineer", "test automation", "quality assurance", "software tester")):
+        return "qa_testing"
+    if any(x in t for x in ("software developer", "software engineer", "python developer", "java developer",
+                             "frontend developer", "backend developer", "full stack developer")):
+        return "software_development"
+    return "other"
+
+
 # ----------------------------------------------------------------------------- reading files
 def _pdf(path: Path) -> tuple[str, list[dict]]:
     from pypdf import PdfReader
@@ -265,7 +279,7 @@ def read_file(resume: dict) -> tuple[str, list[dict]]:
         return extract(tmp, resume["ext"])
 
 
-async def save_upload(user_id: str, filename: str, content: bytes, label: str = "", category: str = "", keywords: list[str] | None = None) -> dict:
+async def save_upload(user_id: str, filename: str, content: bytes, label: str = "", category: str = "", keywords: list[str] | None = None, job_type: str = "", target_role: str = "", effective_from: str = "", effective_until: str = "") -> dict:
     ext = validate_resume_upload(filename, content, settings.max_resume_mb)
     rid = new_id()
     folder = Path(settings.storage_dir) / "resumes" / user_id
@@ -277,15 +291,25 @@ async def save_upload(user_id: str, filename: str, content: bytes, label: str = 
         tmp.write_bytes(content)
         text, links = extract(tmp, ext)
     parsed, warning, link_fields = await parse_resume(text, links)
+    if not job_type or job_type == "other":
+        job_type = infer_resume_job_type(" ".join([target_role, label, parsed.get("desired_role", ""),
+                                                   parsed.get("current_designation", "")]))
 
     db = get_db()
     version = (await db.resumes.count_documents({"user_id": user_id})) + 1
+    job_type = (job_type or "other").strip().lower()
+    family_filter = {"user_id": user_id, "job_type": job_type}
+    family_version = (await db.resumes.count_documents(family_filter)) + 1
+    # Keep one global default for legacy workflows, and one family default per job type.
     await db.resumes.update_many({"user_id": user_id}, {"$set": {"active": False}})
+    await db.resumes.update_many(family_filter, {"$set": {"job_type_active": False}})
     doc = {"_id": rid, "user_id": user_id, "filename": Path(filename).name[:120], "ext": ext, "version": version,
-           "active": True, "storage_path": str(path), "text": text[:50000], "links": links[:60], "parsed": parsed, "link_fields": link_fields,
+           "family_version": family_version, "job_type_active": True, "active": True, "storage_path": str(path), "text": text[:50000], "links": links[:60], "parsed": parsed, "link_fields": link_fields,
            "warning": warning, "created_at": now(),
            "label": (label or parsed.get("desired_role") or parsed.get("current_designation") or Path(filename).stem)[:80],
-           "category": category[:60], "keywords": [k.strip() for k in (keywords or []) if k.strip()][:20]}
+           "category": category[:60], "job_type": job_type[:60], "target_role": target_role[:100],
+           "effective_from": effective_from[:20], "effective_until": effective_until[:20],
+           "keywords": [k.strip() for k in (keywords or []) if k.strip()][:20]}
     await db.resumes.insert_one(doc)
     if not await db.candidate_profiles.find_one({"user_id": user_id}):
         from . import facts
