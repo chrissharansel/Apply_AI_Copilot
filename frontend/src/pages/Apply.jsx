@@ -43,7 +43,7 @@ function Start() {
           <summary>Options for this application</summary>
           <div className="grid2">
             <label className="fld"><span>Resume to use</span>
-              <select value={resumeId} onChange={(e) => setResumeId(e.target.value)}>{resumes.length > 1 && <option value="auto">Auto-pick the best match for this job</option>}{resumes.map((r) => <option key={r.id} value={r.id}>{r.label || r.filename} (v{r.version})</option>)}</select></label>
+              <select value={resumeId} onChange={(e) => setResumeId(e.target.value)}>{resumes.length > 1 && <option value="auto">Auto-pick the best match for this job</option>}{resumes.map((r) => <option key={r.id} value={r.id}>{r.label || r.filename} ({String(r.job_type || "other").replaceAll("_", " ")} · v{r.family_version || r.version})</option>)}</select></label>
             <label className="fld"><span>Free-text questions (“Why us?”)</span>
               <select value={ai} onChange={(e) => setAi(e.target.value)}><option value="">Use my default</option><option value="auto">AI drafts them (I review)</option><option value="ask">I write them (AI can draft on request)</option></select></label>
           </div>

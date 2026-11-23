@@ -8,6 +8,7 @@ import Profile from "./pages/Profile.jsx";
 import Knowledge from "./pages/Knowledge.jsx";
 import History from "./pages/History.jsx";
 import Settings from "./pages/Settings.jsx";
+import Developer from "./pages/Developer.jsx";
 
 function Shell() {
   const nav = useNavigate();
@@ -17,7 +18,12 @@ function Shell() {
   return (
     <div className="shell">
       <aside>
-        <div className="brand">ApplyAI</div>
+        <div className="brand">ApplyAI <span className="brand-mark">AGENT</span></div>
+        <div className="workspace-switch">
+          <span className="workspace-label">WORKSPACES</span>
+          <NavLink to="/" end>Applicant workspace</NavLink>
+          <NavLink to="/developer">Developer studio</NavLink>
+        </div>
         <nav>
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/apply">Apply</NavLink>
@@ -47,6 +53,7 @@ export default function App() {
         <Route path="knowledge" element={<Knowledge />} />
         <Route path="history" element={<History />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="developer" element={<Developer />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

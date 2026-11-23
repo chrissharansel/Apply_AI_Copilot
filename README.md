@@ -99,3 +99,51 @@ Each LLM call is one headless run: `copilot -s` with the prompt on stdin, JSON b
 - After a server restart a session’s browser is gone: press **Resume**. Saved answers are kept, nothing is re-asked.
 - Keep the browser window visible (`HEADLESS=false`) so you can solve CAPTCHAs/logins. Many sites’ terms prohibit automation; you are responsible for using it appropriately.
 - For production: put MongoDB behind auth, serve over HTTPS, add login rate limiting, and consider httpOnly-cookie auth instead of localStorage.
+
+
+## Agent infrastructure and workspaces
+
+The UI now has two workspaces:
+- **Applicant workspace**: candidate profile, job applications, saved answers and resume library.
+- **Developer Studio**: inspect registered agents and tools, inspect each tool's JSON schema, run a workflow and review the tool-call trace. This is an engineering workspace, not an administrator/security role.
+
+### Dynamic agent registry
+
+`backend/app/agents/tool_registry.py` contains the runtime registry:
+- Applicant Coordinator: composes job analysis, candidate context and resume strategy.
+- Job Analysis Agent: extracts job family, seniority and skills.
+- Resume Strategy Agent: compares role-specific resume versions.
+- Candidate Context Agent: retrieves confirmed facts only.
+- Developer Agent Studio: inspects the registry.
+
+Tools are described with IDs, descriptions and JSON input schemas. The router chooses a specialist agent for applicant tasks; a constrained planner selects tools from that agent's allow-list. Every call is schema-checked, traced and audit-logged. Composite tools call other tools through `ToolContext.call()` (for example `job.prepare_application` calls `job.analyze`, `candidate.context` and `resume.recommend`). Recursive calls, excessive call depth and tools outside the selected agent's allow-list are blocked.
+
+The registry deliberately does not expose browser clicks, credentials, CAPTCHA handling or final submission as LLM-callable tools. The existing deterministic Playwright orchestrator remains the only component that controls the browser, and the human approval gate before submission is preserved.
+
+### Resume version strategy
+
+Each uploaded resume stores an overall version and a version within its job family, plus:
+- job family (software development, data/AI, DevOps/cloud, QA/testing, product, design, business or other)
+- target role and specialization
+- matching keywords
+- effective-from / effective-until dates
+- global default and per-family default
+
+Resume matching uses explainable weighted signals: skills and job-description coverage, title/specialization alignment, job-family match, target-role match, keywords, current effective dates, family default and recency. Time/default signals are small tie-breakers; skills and role fit remain dominant. The recommended version is still displayed with evidence and confidence for review.
+
+### Prompt accuracy and safety
+
+Free-text answer generation uses an explicit evidence-only policy and a self-audit. It must not invent experience, skills, employers, dates, metrics or credentials. The model returns unsupported-claim and missing-information fields; unsupported drafts are rejected so the applicant can answer instead. Job posting text, form questions and resume contents are treated as untrusted input. LLM output remains structured data and never becomes a browser action.
+
+
+## Render deployment (backend root directory)
+
+If the Render Web Service has `backend` as its **Root Directory**, configure:
+- Runtime: Docker
+- Dockerfile Path: `Dockerfile`
+- Docker Build Context Directory: `.`
+- Health Check Path: `/api/ping`
+
+The backend Dockerfile is written for this root-directory arrangement (`COPY requirements.txt` and `COPY . .`). Do not set its Dockerfile path to `backend/Dockerfile` while the root directory is already `backend`.
+
+For the separate React Static Site, use `frontend` as the root directory, build command `npm ci && npm run build`, publish directory `dist`, and set `VITE_API_URL=https://<backend-service>.onrender.com/api`.
