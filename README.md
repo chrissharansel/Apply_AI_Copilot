@@ -90,3 +90,50 @@ Each LLM call is one headless run: `copilot -s` with the prompt on stdin, JSON b
 - After a server restart a session’s browser is gone: press **Resume**. Saved answers are kept, nothing is re-asked.
 - Keep the browser window visible (`HEADLESS=false`) so you can solve CAPTCHAs/logins. Many sites’ terms prohibit automation; you are responsible for using it appropriately.
 - For production: put MongoDB behind auth, serve over HTTPS, add login rate limiting, and consider httpOnly-cookie auth instead of localStorage.
+
+## Docker deployment
+
+The repository includes Docker support for the complete local stack:
+- `backend/Dockerfile`: Python/FastAPI, Node.js 22, GitHub Copilot CLI, Playwright and Chromium.
+- `frontend/Dockerfile`: builds the React/Vite app and serves it with Nginx.
+- `docker-compose.yml`: starts MongoDB, backend and frontend, with named volumes for MongoDB and uploaded files.
+
+### Run locally with Docker
+
+1. Copy `backend/.env.example` to `backend/.env`.
+2. Set at least `SECRET_KEY` (16+ characters) and `COPILOT_GITHUB_TOKEN`. Keep this file private; it is excluded from the Docker build context and Git.
+3. From the repository root, run:
+
+   ```bash
+   docker compose up --build
+   ```
+
+4. Open `http://localhost:5173`. The API is at `http://localhost:8000/api` and health check at `http://localhost:8000/api/ping`.
+5. Stop the stack with `docker compose down`. Named volumes keep MongoDB data and `/app/storage` across container recreation. `docker compose down -v` deletes those volumes and their data.
+
+The Compose stack uses `HEADLESS=true`, which is required for a hosted/container browser. A remote container cannot display a normal desktop browser window to your local machine.
+
+### Deploy the backend to Render with Docker
+
+Create/update the backend as a **Web Service → Docker**:
+- Dockerfile path: `backend/Dockerfile`
+- Docker build context: repository root (`.`)
+- Health check path: `/api/ping`
+
+Set these environment variables in Render (do not bake secrets into the image):
+- `MONGODB_URI`: MongoDB Atlas connection string
+- `DATABASE_NAME`: `applyai`
+- `SECRET_KEY`: a randomly generated secret (at least 16 characters)
+- `ENCRYPTION_KEY`: optional Fernet key
+- `COPILOT_GITHUB_TOKEN`: GitHub Copilot CLI token supported for headless use
+- `COPILOT_BIN`: `/usr/local/bin/copilot`
+- `CORS_ORIGINS`: exact React frontend origin, e.g. `https://your-frontend.onrender.com`
+- `STORAGE_DIR`: `/var/data`
+- `HEADLESS`: `true`
+- `MAX_CONCURRENT_SESSIONS`: choose a value appropriate for the service's memory
+
+Attach a Render persistent disk mounted at `/var/data` so uploaded resumes and screenshots survive redeploys. Without a persistent disk or external object storage, container-local uploads are ephemeral. Keep MongoDB Atlas network access restricted to the deployment's required outbound IPs where possible.
+
+Deploy the React frontend separately as a Render Static Site using `frontend` as its root directory, `npm install && npm run build` as the build command, and `dist` as the publish directory. Set `VITE_API_URL` to `https://YOUR-BACKEND.onrender.com/api` at build time. Set the backend's `CORS_ORIGINS` to the frontend's exact HTTPS origin.
+
+**Important:** `HEADLESS=true` means you cannot interact with a visible browser window inside Render. The application can still run Playwright headlessly, but login/MFA/CAPTCHA steps that require a visible browser need a separately designed remote/manual interaction workflow. Also verify the Copilot CLI token and account entitlement in the deployed environment; installing the CLI does not itself authenticate it.
