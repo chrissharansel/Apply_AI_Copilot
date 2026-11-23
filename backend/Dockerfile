@@ -59,4 +59,5 @@ RUN mkdir -p /app/storage && chmod 755 /app/storage
 
 EXPOSE 10000
 
+
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
