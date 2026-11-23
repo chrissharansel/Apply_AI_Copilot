@@ -1,38 +1,33 @@
-
 FROM node:22-bookworm-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    PATH="/opt/venv/bin:/usr/local/bin:${PATH}"
 
 WORKDIR /app
 
-# Install Python and system dependencies
+# Python runtime and certificates. Playwright's --with-deps installs Chromium's
+# required Linux libraries in this image (the build runs as root).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-venv \
-    python3-pip \
-    ca-certificates \
+    python3 python3-venv python3-pip ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create Python virtual environment
 RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:/usr/local/bin:${PATH}"
 
-# Install Python dependencies
 COPY backend/requirements.txt ./requirements.txt
-
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Install GitHub Copilot CLI
-RUN npm install -g @github/copilot
+# GitHub Copilot CLI requires Node.js 22+ (provided by the base image).
+RUN npm install --global @github/copilot
 
-# Install Playwright Chromium and its Linux dependencies
+# Install Chromium and its OS-level dependencies at image-build time.
 RUN python -m playwright install --with-deps chromium
 
-# Copy backend source
-COPY backend/ .
+COPY backend/ ./
 
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONPATH=/app
+RUN mkdir -p /app/storage && chmod 755 /app/storage
 
 EXPOSE 10000
 
