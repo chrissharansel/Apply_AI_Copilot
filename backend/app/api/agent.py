@@ -2,8 +2,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from ..agents.orchestrator import manager
+from ..agents import tool_registry
 from ..config import settings
 from ..database.models import log_audit, new_id, now, public
 from ..database.mongodb import get_db
