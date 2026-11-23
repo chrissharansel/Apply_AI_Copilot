@@ -24,9 +24,9 @@ Rules:
 full_name, email, phone, location, city, state, country, postal_code, address, summary (1-2 sentence professional summary only if the resume has one),
 current_designation, total_experience_years, languages [string],
 education [{{degree, institution, graduation_year}}],
-employment [{{company, title, start_date, end_date, description}}] (end_date "Present" if current),
+employment [{{company, title, start_date, end_date, description, kind}}] (end_date "Present" if current; kind is one of full_time, internship, contract, freelance, part_time; internships and trainee roles are "internship"),
 skills [string], certifications [{{name, issuer}}], projects [{{name, description, technologies [string]}}],
-linkedin, github, portfolio, notice_period, work_authorization"""
+linkedin, github, portfolio, desired_role (the job title this resume is aimed at, only if evident), notice_period, work_authorization"""
 
 URL_RE = re.compile(
     r"(?:https?://|www\.)[^\s<>\"'\)\]]+|\b(?:[a-z0-9-]+\.)?(?:linkedin\.com/(?:in|pub|company)/|github\.com/|gitlab\.com/|"
@@ -212,15 +212,18 @@ def coerce_profile(raw: dict) -> dict:
     return base
 
 
-def apply_links(data: dict, links: list[dict], text: str) -> dict:
-    """Hyperlink URLs are ground truth: they override whatever the LLM guessed."""
+def apply_links(data: dict, links: list[dict], text: str) -> tuple[dict, list[str]]:
+    """Hyperlink URLs are ground truth: they override whatever the LLM guessed. Also returns which fields came from links."""
     c = classify_links(links, text)
+    from_links = []
     for k in ("linkedin", "github", "email", "phone"):
         if c[k]:
             data[k] = c[k]
+            from_links.append(k)
     known = {clean_url(l["url"]).lower() for l in links} | {clean_url(m.group(0)).lower() for m in URL_RE.finditer(text or "")}
     if c["portfolio"]:
         data["portfolio"] = c["portfolio"]
+        from_links.append("portfolio")
     elif clean_url(data.get("portfolio", "")).lower() not in known:
         data["portfolio"] = ""                                # LLM may only pick a URL that really exists in the file
     else:
@@ -237,20 +240,21 @@ def apply_links(data: dict, links: list[dict], text: str) -> dict:
             others.append(o)
             have.add(o["url"].lower())
     data["other_links"] = others[:15]
-    return data
+    return data, from_links
 
 
-async def parse_resume(text: str, links: list[dict]) -> tuple[dict, str | None]:
+async def parse_resume(text: str, links: list[dict]) -> tuple[dict, str | None, list[str]]:
     text = text.strip()
     if len(text) < 50 and not links:
-        return ProfileData().model_dump(), "No readable text found (is this a scanned image?). Fill your profile manually."
+        return ProfileData().model_dump(), "No readable text found (is this a scanned image?). Fill your profile manually.", []
     try:
         raw = await llm.chat_json(EXTRACT_SYSTEM.format(today=date.today().isoformat()),
                                   "RESUME TEXT:\n" + text[:14000] + _links_block(links, text), max_tokens=3000)
         data, warn = coerce_profile(raw), None
     except Exception as e:
         data, warn = coerce_profile({}), f"AI extraction failed ({e}). Only links and contact details were detected; please complete your profile."
-    return apply_links(data, links, text), warn
+    data, from_links = apply_links(data, links, text)
+    return data, warn, from_links
 
 
 # ----------------------------------------------------------------------------- storage
@@ -261,7 +265,7 @@ def read_file(resume: dict) -> tuple[str, list[dict]]:
         return extract(tmp, resume["ext"])
 
 
-async def save_upload(user_id: str, filename: str, content: bytes) -> dict:
+async def save_upload(user_id: str, filename: str, content: bytes, label: str = "", category: str = "", keywords: list[str] | None = None) -> dict:
     ext = validate_resume_upload(filename, content, settings.max_resume_mb)
     rid = new_id()
     folder = Path(settings.storage_dir) / "resumes" / user_id
@@ -272,25 +276,28 @@ async def save_upload(user_id: str, filename: str, content: bytes) -> dict:
         tmp = Path(td) / f"r{ext}"
         tmp.write_bytes(content)
         text, links = extract(tmp, ext)
-    parsed, warning = await parse_resume(text, links)
+    parsed, warning, link_fields = await parse_resume(text, links)
 
     db = get_db()
     version = (await db.resumes.count_documents({"user_id": user_id})) + 1
     await db.resumes.update_many({"user_id": user_id}, {"$set": {"active": False}})
     doc = {"_id": rid, "user_id": user_id, "filename": Path(filename).name[:120], "ext": ext, "version": version,
-           "active": True, "storage_path": str(path), "text": text[:50000], "links": links[:60], "parsed": parsed,
-           "warning": warning, "created_at": now()}
+           "active": True, "storage_path": str(path), "text": text[:50000], "links": links[:60], "parsed": parsed, "link_fields": link_fields,
+           "warning": warning, "created_at": now(),
+           "label": (label or parsed.get("desired_role") or parsed.get("current_designation") or Path(filename).stem)[:80],
+           "category": category[:60], "keywords": [k.strip() for k in (keywords or []) if k.strip()][:20]}
     await db.resumes.insert_one(doc)
     if not await db.candidate_profiles.find_one({"user_id": user_id}):
-        await db.candidate_profiles.insert_one({"_id": new_id(), "user_id": user_id, "data": parsed, "confirmed": False,
-                                                "source_resume_id": rid, "updated_at": now()})
+        from . import facts
+        await db.candidate_profiles.insert_one({"_id": new_id(), "user_id": user_id, "data": parsed, "confirmed": False, "source_resume_id": rid,
+                                                "facts": facts.from_resume(parsed, link_fields, rid), "decisions": {}, "updated_at": now()})
     return doc
 
 
 async def reparse(resume: dict) -> dict:
     text, links = read_file(resume)
-    parsed, warning = await parse_resume(text, links)
-    upd = {"text": text[:50000], "links": links[:60], "parsed": parsed, "warning": warning}
+    parsed, warning, link_fields = await parse_resume(text, links)
+    upd = {"text": text[:50000], "links": links[:60], "parsed": parsed, "warning": warning, "link_fields": link_fields}
     await get_db().resumes.update_one({"_id": resume["_id"]}, {"$set": upd})
     return {**resume, **upd}
 

@@ -3,6 +3,8 @@ The LLM (Copilot CLI) is consulted only for (a) free-text drafting and (b) mappi
 import re
 from datetime import datetime
 
+from ..services import experience as exp
+from ..services import facts
 from ..services import knowledge_service as kb
 from .answer_generator import (format_date, generate_free_text, llm_pick_option, match_option, parse_date, to_bool)
 from .form_analyzer import GENERATIVE_RE, OPTIONAL_FREE_RE, PREF_KEYS, profile_value
@@ -12,8 +14,10 @@ MULTI = ("checkbox_group", "multiselect")
 
 
 class Planner:
-    def __init__(self, user_id: str, profile: dict, job: dict, resume_name: str = "resume", opts: dict | None = None):
+    def __init__(self, user_id: str, profile: dict, job: dict, resume_name: str = "resume", opts: dict | None = None, fmeta: dict | None = None):
         self.uid, self.profile, self.job, self.resume_name = user_id, profile, job, resume_name
+        self.fmeta = fmeta                      # fact path -> {source, confidence, updated_at}; None = legacy (trust everything)
+        self.calc = exp.calculate(profile.get("employment") or [])
         self.opts = {"ai_answers": "auto", "tone": "professional", "writing_notes": "", "job_notes": "", "max_words": 150,
                      "semantic_reuse": True, **(opts or {})}
         self._facts: list[dict] | None = None
@@ -22,7 +26,7 @@ class Planner:
         base = {"key": f["key"], "field_id": f["id"], "label": f["label"], "kind": f["kind"], "required": f["required"],
                 "category": f["category"], "sensitive": f["sensitive"], "options": f["options"], "maxlength": f.get("maxlength"),
                 "multi": f.get("multi", False), "custom": f.get("custom", "native"), "date_format": f.get("date_format"),
-                "action": "ask", "status": "planned", "source": None, "value": None, "option_ids": [], "confidence": 0.0,
+                "profile_key": f.get("profile_key"), "fact": None, "action": "ask", "status": "planned", "source": None, "value": None, "option_ids": [], "confidence": 0.0,
                 "flags": ["sensitive"] if f["sensitive"] else [], "suggestion": None, "note": None, "kb_entry_id": None}
         base.update(kw)
         return base
@@ -53,6 +57,24 @@ class Planner:
                 return None                                  # "immediately", "2 weeks"... -> ask for an actual date
             return {"value": format_date(d, f.get("date_format")), "option_ids": []}
         return {"value": text, "option_ids": []} if text else None
+
+    async def _plan_experience(self, f: dict, pk: str) -> dict | None:
+        info = exp.years_for(self.profile, self.calc, pk)
+        if not info:
+            return None
+        unit, opts = f.get("exp_unit", "years"), f.get("options") or []
+        if f["kind"] in ("select", "radio", "combobox") and opts:
+            o = exp.numeric_option(info["years"], opts)
+            r = {"value": o["label"], "option_ids": [o["id"]]} if o else None
+        else:
+            r = await self.resolve(f, exp.format_years(info["years"], f["kind"], f.get("step", ""), unit))
+        if not r:
+            return None
+        why = f"{info['years']:.1f} years, {info['note']}"
+        ok = not info["estimate"] and (self.fmeta is None or all(facts.trusted(self.fmeta.get(p), p) for p in info["fact_paths"]))
+        if ok:
+            return self._item(f, action="fill", source="calculated", confidence=0.9, note=why, flags=["calculated"], **r)
+        return self._ask(f, suggestion=r["value"], note=why + (" (an estimate, please confirm)" if info["estimate"] else " (some of that history isn't confirmed yet)"))
 
     def _ask(self, f: dict, suggestion=None, note=None, **kw) -> dict:
         opts = [o["label"] for o in f["options"]]
@@ -85,14 +107,25 @@ class Planner:
             return self._item(f, action="manual", manual=True, kind="manual",
                               note=f"Please attach “{label}” yourself in the browser window.")
 
-        # 2. Identity facts straight from the confirmed profile (never for sensitive fields)
-        if f.get("profile_key") and not f["sensitive"]:
-            v = profile_value(self.profile, f["profile_key"])
+        suggestion, note, fact = None, None, None
+        # 2a. Experience: calculated from employment/internship records, in the category the question asks for
+        pk = f.get("profile_key")
+        if pk and (pk == "total_experience" or pk.startswith("exp:")):
+            if res := await self._plan_experience(f, pk):
+                return res
+
+        # 2b. Identity facts from the profile. Only facts the user has CONFIRMED are typed in automatically;
+        #     resume-only / unconfirmed facts become suggestions the user approves with one click.
+        elif pk and not f["sensitive"]:
+            v = profile_value(self.profile, pk)
             if v and (r := await self.resolve(f, v)):
-                return self._item(f, action="fill", source="profile", confidence=1.0, **r)
+                path = facts.fact_path(self.profile, pk)
+                meta = (self.fmeta or {}).get(path) if path else None
+                if self.fmeta is None or path is None or facts.trusted(meta, path):
+                    return self._item(f, action="fill", source="profile", confidence=(meta or {}).get("confidence", 1.0), **r)
+                suggestion, note, fact = v, facts.explain(meta, path), path
 
         # 3. Persistent knowledge base: only user-verified & fresh answers are auto-used
-        suggestion, note = None, None
         m = await kb.find_answer(self.uid, label, f["category"])
         if m:
             if not self.opts["semantic_reuse"] and m["match_type"] != "exact":
@@ -101,7 +134,8 @@ class Planner:
                 await kb.touch(m["entry_id"])
                 return self._item(f, action="fill", source="knowledge_base", confidence=m["confidence"],
                                   kb_entry_id=m["entry_id"], note=m["reason"], **r)
-            suggestion, note = m["answer"], m["reason"]
+            if not suggestion:
+                suggestion, note = m["answer"], m["reason"]
 
         # 4. Profile preference values (notice period, salary ...): auto-fill if non-sensitive, else only suggest
         pk = PREF_KEYS.get(f["category"])
@@ -128,4 +162,4 @@ class Planner:
         if f.get("value") and not f["sensitive"]:
             return self._item(f, action="keep", status="kept", source="prefilled", value=f["value"], flags=["prefilled"], confidence=0.5)
 
-        return self._ask(f, suggestion=suggestion, note=note)
+        return self._ask(f, suggestion=suggestion, note=note, fact=fact)

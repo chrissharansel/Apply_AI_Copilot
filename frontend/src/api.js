@@ -26,7 +26,7 @@ export const api = {
   post: (p, body = {}) => req(p, { method: "POST", body }),
   put: (p, body) => req(p, { method: "PUT", body }),
   del: (p) => req(p, { method: "DELETE" }),
-  upload: (p, file) => { const f = new FormData(); f.append("file", file); return req(p, { method: "POST", form: f }); },
+  upload: (p, file, extra = {}) => { const f = new FormData(); f.append("file", file); Object.entries(extra).forEach(([k, v]) => f.append(k, v)); return req(p, { method: "POST", form: f }); },
   blob: async (p) => {
     const res = await fetch(BASE + p, { headers: { Authorization: `Bearer ${auth.get()}` } });
     if (!res.ok) throw new Error("No snapshot yet");

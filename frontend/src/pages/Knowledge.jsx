@@ -33,7 +33,7 @@ export default function Knowledge() {
         <table><thead><tr><th>Question</th><th>Answer</th><th>Status</th><th>Reuse</th><th></th></tr></thead><tbody>
           {rows.map((r) => (
             <tr key={r.id}>
-              <td>{r.question}<div className="muted small">{r.category.replace(/_/g, " ")}, updated {when(r.updated_at)}</div></td>
+              <td>{r.question}<div className="muted small">{r.category.replace(/_/g, " ")}, updated {when(r.updated_at)}{r.use_count ? `, used ${r.use_count}×` : ""}{r.source === "approved" ? ", approved at review" : ""}</div></td>
               <td>{edit?.id === r.id ? <input autoFocus value={edit.answer} onChange={(e) => setEdit({ ...edit, answer: e.target.value })} /> : r.answer}</td>
               <td>{r.needs_confirmation ? <Chip cls="c-amber">{r.verified ? "Old, reconfirm" : "Unconfirmed"}</Chip> : <Chip cls="c-green">Confirmed</Chip>}{r.sensitive && <Chip cls="c-rose">Sensitive</Chip>}{r.application_id && <Chip>One job only</Chip>}</td>
               <td><label className="inline"><input type="checkbox" checked={r.reusable} onChange={(e) => run(() => api.put(`/knowledge/${r.id}`, { reusable: e.target.checked }))} /> Reuse</label></td>

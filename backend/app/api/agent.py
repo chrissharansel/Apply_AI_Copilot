@@ -11,6 +11,7 @@ from ..agents.answer_generator import generate_free_text
 from ..schemas.agent import AnswerIn, ApproveIn, DraftIn, StartSession
 from ..schemas.settings import UserSettings
 from ..services import application_service as apps
+from ..services import facts
 from ..services import knowledge_service as kb
 from ..services.browser_service import bm
 from ..services.llm_service import llm
@@ -32,6 +33,15 @@ async def _msg(s: dict, role: str, text: str, kind: str = "answer") -> None:
                                                    "role": role, "kind": kind, "text": text, "meta": {}, "ts": now()})
 
 
+async def _confirm_fact(uid: str, path: str, value: str) -> None:
+    prof = await get_db().candidate_profiles.find_one({"user_id": uid})
+    if not prof:
+        return
+    meta = dict(prof.get("facts") or facts.migrate(prof))
+    meta[path] = facts.entry("user_confirmed")
+    await get_db().candidate_profiles.update_one({"_id": prof["_id"]}, {"$set": {f"data.{path}": value, "facts": meta, "updated_at": now()}})
+
+
 @router.get("/health")
 async def health(user=Depends(current_user)):
     return await llm.health()
@@ -47,7 +57,8 @@ async def start(body: StartSession, user=Depends(current_user)):
     prof = await db.candidate_profiles.find_one({"user_id": uid})
     if not prof or not prof.get("confirmed"):
         raise HTTPException(400, "Review and confirm your profile first. The agent only uses confirmed information.")
-    q = {"_id": body.resume_id, "user_id": uid} if body.resume_id else {"user_id": uid, "active": True}
+    auto = body.resume_id == "auto"
+    q = {"_id": body.resume_id, "user_id": uid} if body.resume_id and not auto else {"user_id": uid, "active": True}
     resume = await db.resumes.find_one(q)
     if not resume:
         raise HTTPException(400, "Upload a resume first.")
@@ -59,7 +70,7 @@ async def start(body: StartSession, user=Depends(current_user)):
         "_id": sid, "user_id": uid, "url": url, "resume_id": resume["_id"], "application_id": aid,
         "status": "Pending", "state": "INIT", "progress": 0, "job": {}, "collected": {}, "pending_questions": [],
         "results": [], "review": None, "approval": None, "step": 0, "error": None, "resumable": False, "paused": False,
-        "options": {"notes": body.notes.strip(), "show_browser": body.show_browser, "ai_answers": body.ai_answers},
+        "options": {"notes": body.notes.strip(), "show_browser": body.show_browser, "ai_answers": body.ai_answers, "resume_mode": "auto" if auto else "fixed"},
         "created_at": now(), "updated_at": now()})
     await log_audit(uid, "session_start", session_id=sid, host=url.split("/")[2])
     manager.launch(sid, uid)
@@ -121,6 +132,8 @@ async def answer(sid: str, body: AnswerIn, user=Depends(current_user)):
                                  reusable=body.save == "reusable", application_id=s["application_id"] if body.save == "job_only" else None)
             await _msg(s, "agent", "Saved for future applications." if body.save == "reusable" else "Saved for this application only.", "activity")
         status = "answered"
+        if body.save == "reusable" and q.get("profile_key") in facts.DIRECT_KEYS and isinstance(value, str):
+            await _confirm_fact(user["_id"], facts.DIRECT_KEYS[q["profile_key"]], value)    # their answer is a confirmed profile fact
     await db.agent_sessions.update_one({"_id": sid}, {"$set": {**upd, "pending_questions.$[q].status": status, "updated_at": now()}},
                                        array_filters=[{"q.qid": body.qid}])
     return {"ok": True}

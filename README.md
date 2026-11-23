@@ -30,6 +30,15 @@ Tests: `cd backend && SECRET_KEY=test-secret-key-123456 pytest`.
 4. **Dynamic forms.** After filling, the page is re-observed (up to 6 passes per step); newly revealed fields are planned and filled without restarting. If React re-renders a node, the field is re-found by meaning and retried.
 5. **Multi-page.** Next / Continue / Save & continue / Review are recognised; Back, Skip, Save draft and "Continue with Google/LinkedIn" are ignored. The site's own "Step 2 of 5" drives the progress bar. Optional step-by-step mode waits for you after every page.
 
+## Candidate profile intelligence
+
+- **Centralized profile:** personal and contact details, education, employment *and internships*, skills, certifications, projects, links. Edited on the **Profile** page (Details tab).
+- **Multiple resumes:** upload one per job category with a label (Python Developer, Java Developer, AI Engineer…), a category and optional keywords. On the Apply page choose **Auto-pick the best match for this job**: resumes are scored against the job title and description (term coverage, label/keyword alignment; one tie-break call to Copilot only when two are very close) and the chosen one is uploaded, with the reason shown. The Resumes tab also has a paste-a-job-description recommender.
+- **Automatic experience:** calculated from employment and internship dates. Overlapping jobs are counted once, internships are separate, and the form's own wording decides the category: total, professional (no internships), internship, current role, or a specific skill ("years of Python"). Range dropdowns ("3-5 years") are matched to the right bucket, integer-only boxes get the floor (never overstated), and "months" fields are converted. Skill-specific years are estimates and are only ever *suggested*.
+- **Knowledge memory:** confirmed answers are stored and reused (exact, then similar wording). Free-text answers you approved at review are saved too, but for that job only, never auto-reused elsewhere unless you mark them reusable.
+- **Conflict detection:** a resume is compared with your saved profile (name, email, phone, links, designation, employer titles and start/end dates, graduation years, certifications, stated vs calculated experience). Differences are listed with severity; you pick profile / resume / enter another. Rulings are remembered per resume value so you aren't asked twice.
+- **Fact confidence:** every detail records a source and confidence: *Confirmed by you* (100%), *Approved* / *Calculated* (90%), *Resume link* (85%), *Typed, not confirmed* (80%), *Read from resume* (60%), *Unverified* (30%), or *Missing*. **The agent types in only confirmed facts.** Anything else becomes a one-click suggestion ("I found this on your resume, use it?"), and answering confirms the fact. Volatile facts (notice period, salary, availability) expire and are re-checked.
+
 ## Resume links (LinkedIn / GitHub / portfolio)
 
 Clickable labels like "LinkedIn" keep their URL in the PDF's link annotations or the DOCX hyperlink relationships, not in the visible text. These are now read directly (including DOCX headers, footers, tables and text boxes) and classified by domain, and they override anything the LLM guessed. Press **Fetch links from my resume** on the Profile page for an already-uploaded resume (no AI involved), or **Re-read** to re-extract everything.
@@ -90,50 +99,3 @@ Each LLM call is one headless run: `copilot -s` with the prompt on stdin, JSON b
 - After a server restart a session’s browser is gone: press **Resume**. Saved answers are kept, nothing is re-asked.
 - Keep the browser window visible (`HEADLESS=false`) so you can solve CAPTCHAs/logins. Many sites’ terms prohibit automation; you are responsible for using it appropriately.
 - For production: put MongoDB behind auth, serve over HTTPS, add login rate limiting, and consider httpOnly-cookie auth instead of localStorage.
-
-## Docker deployment
-
-The repository includes Docker support for the complete local stack:
-- `backend/Dockerfile`: Python/FastAPI, Node.js 22, GitHub Copilot CLI, Playwright and Chromium.
-- `frontend/Dockerfile`: builds the React/Vite app and serves it with Nginx.
-- `docker-compose.yml`: starts MongoDB, backend and frontend, with named volumes for MongoDB and uploaded files.
-
-### Run locally with Docker
-
-1. Copy `backend/.env.example` to `backend/.env`.
-2. Set at least `SECRET_KEY` (16+ characters) and `COPILOT_GITHUB_TOKEN`. Keep this file private; it is excluded from the Docker build context and Git.
-3. From the repository root, run:
-
-   ```bash
-   docker compose up --build
-   ```
-
-4. Open `http://localhost:5173`. The API is at `http://localhost:8000/api` and health check at `http://localhost:8000/api/ping`.
-5. Stop the stack with `docker compose down`. Named volumes keep MongoDB data and `/app/storage` across container recreation. `docker compose down -v` deletes those volumes and their data.
-
-The Compose stack uses `HEADLESS=true`, which is required for a hosted/container browser. A remote container cannot display a normal desktop browser window to your local machine.
-
-### Deploy the backend to Render with Docker
-
-Create/update the backend as a **Web Service → Docker**:
-- Dockerfile path: `backend/Dockerfile`
-- Docker build context: repository root (`.`)
-- Health check path: `/api/ping`
-
-Set these environment variables in Render (do not bake secrets into the image):
-- `MONGODB_URI`: MongoDB Atlas connection string
-- `DATABASE_NAME`: `applyai`
-- `SECRET_KEY`: a randomly generated secret (at least 16 characters)
-- `ENCRYPTION_KEY`: optional Fernet key
-- `COPILOT_GITHUB_TOKEN`: GitHub Copilot CLI token supported for headless use
-- `COPILOT_BIN`: `/usr/local/bin/copilot`
-- `CORS_ORIGINS`: exact React frontend origin, e.g. `https://your-frontend.onrender.com`
-- `STORAGE_DIR`: `/var/data`
-- `HEADLESS`: `true`
-- `MAX_CONCURRENT_SESSIONS`: choose a value appropriate for the service's memory
-
-Attach a Render persistent disk mounted at `/var/data` so uploaded resumes and screenshots survive redeploys. Without a persistent disk or external object storage, container-local uploads are ephemeral. Keep MongoDB Atlas network access restricted to the deployment's required outbound IPs where possible.
-
-Deploy the React frontend separately as a Render Static Site using `frontend` as its root directory, `npm install && npm run build` as the build command, and `dist` as the publish directory. Set `VITE_API_URL` to `https://YOUR-BACKEND.onrender.com/api` at build time. Set the backend's `CORS_ORIGINS` to the frontend's exact HTTPS origin.
-
-**Important:** `HEADLESS=true` means you cannot interact with a visible browser window inside Render. The application can still run Playwright headlessly, but login/MFA/CAPTCHA steps that require a visible browser need a separately designed remote/manual interaction workflow. Also verify the Copilot CLI token and account entitlement in the deployed environment; installing the CLI does not itself authenticate it.

@@ -37,7 +37,7 @@ async def fake_chat(system, user, **k):
 llm.chat_json = fake_chat
 
 ANS = {"Work mode": "Hybrid", "Preferred shift": "Night", "Open to relocation": "yes", "Skills you want": "Python, Go", "Available from": "15 Jan 2027",
-       "Were you referred": "No", "authorized": "No", "Cover note": "Happy to chat anytime.", "Reference email": "skip"}
+       "Were you referred": "No", "authorized": "No", "Cover note": "Happy to chat anytime.", "Reference email": "skip", "Python experience": "5", "LinkedIn": "https://linkedin.com/in/asha-rao-123"}
 
 async def user_sim(sid, events):
     db = get_db(); paused_once = False
@@ -69,9 +69,14 @@ async def user_sim(sid, events):
 
 async def main():
     db = get_db(); uid = new_id(); sid = new_id(); rid = new_id(); aid = new_id()
-    await db.candidate_profiles.insert_one({"_id": new_id(), "user_id": uid, "confirmed": True, "data": {
-        "full_name": "Asha Rao", "email": "asha@example.com", "phone": "+91 98765 43210", "location": "Bengaluru, Karnataka, India",
-        "linkedin": "https://linkedin.com/in/asha-rao-123", "github": "https://github.com/asharao", "postal_code": "560001", "skills": ["Python", "Go"]}})
+    from app.services import facts as F
+    pdata = {"full_name": "Asha Rao", "email": "asha@example.com", "phone": "+91 98765 43210", "location": "Bengaluru, Karnataka, India",
+             "linkedin": "https://linkedin.com/in/asha-rao-123", "github": "https://github.com/asharao", "postal_code": "560001", "skills": ["Python", "Go"],
+             "employment": [{"company": "Acme", "title": "Software Engineer", "start_date": "Jan 2020", "end_date": "Dec 2021", "description": "Python, Django", "kind": "full_time"},
+                            {"company": "Beta Labs", "title": "Backend Developer", "start_date": "Jun 2021", "end_date": "Present", "description": "Go and Python", "kind": "full_time"}]}
+    meta = F.update_on_save({}, {}, pdata, True)
+    meta["linkedin"] = F.entry("resume_link")                       # read from a resume link but never confirmed by the user
+    await db.candidate_profiles.insert_one({"_id": new_id(), "user_id": uid, "confirmed": True, "data": pdata, "facts": meta})
     await db.resumes.insert_one({"_id": rid, "user_id": uid, "filename": "Asha_Rao_Resume.pdf", "ext": ".pdf", "version": 1, "active": True, "storage_path": os.path.join(os.path.dirname(__file__), "sample_resume.pdf")})
     await db.applications.insert_one({"_id": aid, "user_id": uid, "status": "Pending", "errors": []})
     await db.agent_sessions.insert_one({"_id": sid, "user_id": uid, "url": "http://127.0.0.1:8765/form.html", "resume_id": rid, "application_id": aid,

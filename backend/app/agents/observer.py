@@ -50,7 +50,7 @@ OBSERVE_JS = r"""
     const req = el.required || el.getAttribute('aria-required') === 'true' || /\*\s*$|\(required\)/i.test(label);
     return { id: tag(el), kind, label, name: el.getAttribute('name') || '', domid: el.id || '', placeholder: el.getAttribute('placeholder') || '',
       ariaLabel: el.getAttribute('aria-label') || '', autocomplete: el.getAttribute('autocomplete') || '', hint: hintOf(el), section: sectionOf(el),
-      required: req, maxlength: el.maxLength > 0 ? el.maxLength : null, options: [], value: '', custom: 'native', multi: false, ...extra };
+      required: req, maxlength: el.maxLength > 0 ? el.maxLength : null, step: el.getAttribute('step') || '', options: [], value: '', custom: 'native', multi: false, ...extra };
   };
   const skip = el => el.closest('header, nav, footer, [role=search]');
 

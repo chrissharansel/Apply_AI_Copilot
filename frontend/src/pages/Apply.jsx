@@ -21,7 +21,7 @@ function Start() {
   const [recent, setRecent] = useState([]);
   useEffect(() => {
     api.get("/agent/sessions").then(setRecent).catch(() => {});
-    api.get("/resumes").then((r) => { setResumes(r); setResumeId(r.find((x) => x.active)?.id || ""); }).catch(() => {});
+    api.get("/resumes").then((r) => { setResumes(r); setResumeId(r.length > 1 ? "auto" : r.find((x) => x.active)?.id || ""); }).catch(() => {});
     api.get("/settings").then((x) => setShow(x.show_browser)).catch(() => {});
   }, []);
   const go = async (e) => {
@@ -43,7 +43,7 @@ function Start() {
           <summary>Options for this application</summary>
           <div className="grid2">
             <label className="fld"><span>Resume to use</span>
-              <select value={resumeId} onChange={(e) => setResumeId(e.target.value)}>{resumes.map((r) => <option key={r.id} value={r.id}>v{r.version}: {r.filename}</option>)}</select></label>
+              <select value={resumeId} onChange={(e) => setResumeId(e.target.value)}>{resumes.length > 1 && <option value="auto">Auto-pick the best match for this job</option>}{resumes.map((r) => <option key={r.id} value={r.id}>{r.label || r.filename} (v{r.version})</option>)}</select></label>
             <label className="fld"><span>Free-text questions (“Why us?”)</span>
               <select value={ai} onChange={(e) => setAi(e.target.value)}><option value="">Use my default</option><option value="auto">AI drafts them (I review)</option><option value="ask">I write them (AI can draft on request)</option></select></label>
           </div>
@@ -80,6 +80,7 @@ function Session({ id }) {
         <div>
           <h1>{s.job?.title || "Reading the job posting…"}</h1>
           <p className="muted">{s.job?.company ? `${s.job.company} on ` : ""}<a href={s.url} target="_blank" rel="noreferrer">{host(s.url)}</a></p>
+          {s.resume_choice && <p className="muted small">Resume: <b>{s.resume_choice.label}</b>, {s.resume_choice.reason}</p>}
         </div>
         <div className="row"><StatusChip status={s.status} />
           {s.resumable && <button onClick={() => act("resume")}>Resume</button>}
@@ -112,7 +113,7 @@ function FieldTable({ items }) {
       {rows.map((i, n) => (
         <tr key={i.sk || n}>
           <td className="lbl">{i.label}{i.required && <span className="req"> required</span>}</td>
-          <td className="val">{i.kind === "file" ? i.value : i.status === "planned" ? <span className="muted">Waiting for your answer</span> : (i.value ?? <span className="muted">{i.note || "Empty"}</span>)}</td>
+          <td className="val" title={i.note || ""}>{i.kind === "file" ? i.value : i.status === "planned" ? <span className="muted">Waiting for your answer</span> : (i.value ?? <span className="muted">{i.note || "Empty"}</span>)}</td>
           <td className="tags"><SourceChip source={i.source} /><FlagChips flags={i.flags} />{i.status === "skipped" && <Chip>Skipped</Chip>}{i.status === "manual" && <Chip cls="c-green">Done by you</Chip>}</td>
         </tr>
       ))}

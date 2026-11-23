@@ -12,6 +12,9 @@ from urllib.parse import urlparse
 from ..database.mongodb import get_db
 from ..database.models import new_id, now
 from ..services import application_service as apps
+from ..services import facts as fact_svc
+from ..services import knowledge_service as kb
+from ..services.resume_match import recommend
 from ..services.browser_service import bm
 from ..services.llm_service import llm
 from ..services.resume_service import materialize_resume
@@ -223,7 +226,7 @@ class Orchestrator:
                 "options": item.get("ask_options") or [], "suggested": sug, "note": item.get("note"),
                 "category": item["category"], "sensitive": item["sensitive"], "required": item["required"],
                 "can_skip": not item["required"], "manual": bool(item.get("manual")), "status": "open", "step": self.step,
-                "maxlength": item.get("maxlength")}
+                "maxlength": item.get("maxlength"), "profile_key": item.get("profile_key"), "fact": item.get("fact")}
 
     # ------------------------------------------------------------------ states
     async def st_init(self) -> str:
@@ -242,7 +245,11 @@ class Orchestrator:
         opts = {"ai_answers": o.get("ai_answers") or self.us["ai_answers"], "tone": self.us["tone"], "writing_notes": self.us["writing_notes"],
                 "job_notes": o.get("notes", ""), "max_words": self.us["max_words"], "semantic_reuse": self.us["semantic_reuse"]}
         show = o["show_browser"] if o.get("show_browser") is not None else self.us["show_browser"]
-        self.planner = Planner(self.uid, self.profile, self.job, resume["filename"], opts)
+        fmeta = prof.get("facts")
+        if fmeta is None:
+            fmeta = fact_svc.migrate(prof)
+        self.resume = resume
+        self.planner = Planner(self.uid, self.profile, self.job, resume["filename"], opts, fmeta)
         self.page = await bm.new_page(self.sid, headless=not show)
         self.exec = Executor(self.page, resume_path)
         self.step, self.dyn, self.apply_clicked, self.respect_existing = 0, 0, False, False
@@ -266,8 +273,31 @@ class Orchestrator:
         await self.check_blockers()
         if not self.job.get("title"):
             await self.extract_job()
+        await self.maybe_pick_resume()
         await self.update(progress=15)
         return "ANALYZE"
+
+    async def maybe_pick_resume(self) -> None:
+        """'Auto' mode: choose the resume whose focus best fits THIS job (e.g. Python Developer vs Java Developer)."""
+        s = await self.reload()
+        if (s.get("options") or {}).get("resume_mode") != "auto":
+            return
+        rec = await recommend(self.uid, self.job)
+        if not rec or len(rec["ranking"]) < 2:
+            return
+        sure = "" if rec["confidence"] != "low" else " I'm not very sure about this one; change the file in the form if you prefer another."
+        if rec["best"] != self.resume["_id"]:
+            new = await get_db().resumes.find_one({"_id": rec["best"], "user_id": self.uid})
+            if not new:
+                return
+            self.resume_ctx.__exit__(None, None, None)
+            self.resume_ctx = materialize_resume(new)
+            self.exec.resume_path = self.resume_ctx.__enter__()
+            self.planner.resume_name, self.resume = new["filename"], new
+            await self.update(resume_id=new["_id"])
+            await apps.update(self.app_id, resume_id=new["_id"], resume_version=new["version"], resume_filename=new["filename"])
+        await self.update(resume_choice={"label": rec["label"], "reason": rec["reason"], "confidence": rec["confidence"]})
+        await self.log(f"Using your “{rec['label']}” resume for this job ({rec['reason']}).{sure}")
 
     async def check_blockers(self) -> None:
         for _ in range(3):
@@ -478,6 +508,10 @@ class Orchestrator:
             return "CANCELLED"
         for sk, value in (ap.get("edits") or {}).items():
             await self.apply_edit(sk, value)
+        for it in self.results.values():                         # remember approved free-text answers (this job only, never auto-reused elsewhere)
+            if it.get("value") and it["kind"] in ("text", "textarea", "richtext") and ("ai_generated" in it["flags"] or "edited" in it["flags"]):
+                await kb.save_answer(self.uid, it["label"], str(it["value"]), category=it["category"], source="approved", verified=True,
+                                     reusable=False, application_id=self.app_id)
         await self.update(status="In Progress", progress=92)
         await apps.set_status(self.app_id, "In Progress")
         return "SUBMIT"

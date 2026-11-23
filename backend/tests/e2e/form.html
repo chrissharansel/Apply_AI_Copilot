@@ -8,6 +8,8 @@
  <div class="form-group"><label for="b">Surname</label><input id="b" name="x2"></div>
  <div class="form-group"><label for="c">Mobile Number *</label><input id="c" type="tel" oninput="this.value=this.value.replace(/\D/g,'').replace(/(\d{2})(\d{5})(\d{0,5})/,'+$1 $2 $3').trim()"></div>
  <div class="form-group"><label for="d">E-mail address</label><input id="d" type="email"></div>
+ <div class="form-group"><label for="exp">Total experience (years) *</label><select id="exp"><option value="">Select...</option><option>Less than 1 year</option><option>1-3 years</option><option>3-5 years</option><option>5+ years</option></select></div>
+ <div class="form-group"><label for="py">Years of Python experience</label><input id="py" type="number"></div>
  <div class="form-group"><label>Your LinkedIn profile</label><input name="li" placeholder="https://linkedin.com/in/..."></div>
  <div class="form-group"><label for="e">Contact</label><input id="e" name="github_url" placeholder="GitHub link"></div>
  <div class="form-group"><label for="cty">Country *</label>

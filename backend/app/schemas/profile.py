@@ -13,6 +13,7 @@ class Employment(BaseModel):
     start_date: str = ""
     end_date: str = ""        # empty / "Present" = current job
     description: str = ""
+    kind: str = "full_time"   # full_time | internship | contract | freelance | part_time
 
 
 class Certification(BaseModel):
@@ -61,6 +62,7 @@ class ProfileData(BaseModel):
     notice_period: str = ""
     work_authorization: str = ""
     availability: str = ""
+    experience_mode: str = "calculated"   # calculated (from employment records) | manual (use the stated total)
 
 
 class ProfileUpdate(BaseModel):

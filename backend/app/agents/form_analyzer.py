@@ -6,6 +6,7 @@ import re
 
 from ..services.knowledge_service import SENSITIVE, answer_key, categorize
 from ..services.llm_service import llm
+from ..services.experience import experience_key, unit_of
 from .answer_generator import date_format_from_hint
 
 RULES = [
@@ -25,7 +26,6 @@ RULES = [
     ("location", r"^(current\s*)?location\b|where are you (based|located|currently)|location\s*\(city"),
     ("current_company", r"current\s*(company|employer|organi[sz]ation)|present\s*(company|employer)|most recent\s*(company|employer)|^employer$|^company$"),
     ("current_title", r"current\s*(title|designation|role|position|job\s*title)|^job\s*title$|^designation$|^title$|^position$"),
-    ("total_experience", r"^(total|overall)\s.{0,25}experience|^years of (total |overall |professional |work |relevant )?experience$|total years|^experience\s*\(years\)"),
     ("skills", r"^(key |technical |primary |core )?skills\b"),
     ("university", r"university|college|\bschool\b|institution|alma mater"),
     ("degree", r"^degree|highest\s*(level of )?(education|qualification)|qualification"),
@@ -34,7 +34,7 @@ RULES = [
     ("languages", r"languages?\s*(spoken|known)|^languages$"),
 ]
 _R = [(k, re.compile(p, re.I)) for k, p in RULES]
-PROFILE_KEYS = [k for k, _ in RULES]
+PROFILE_KEYS = [k for k, _ in RULES] + ["total_experience"]
 NOT_ABOUT_ME = re.compile(r"referr|referee|reference|emergency|spouse|parent|guardian|supervisor|manager|recruiter|friend|colleague|relative|previous|former|alternate|alternative", re.I)
 AUTOCOMPLETE = {"given-name": "first_name", "family-name": "last_name", "name": "full_name", "email": "email", "tel": "phone",
                 "tel-national": "phone", "street-address": "address", "address-line1": "address", "address-level2": "city",
@@ -132,6 +132,9 @@ def annotate(fields: list[dict]) -> list[dict]:
         f["category"] = categorize(f["label"])
         f["sensitive"] = f["category"] in SENSITIVE
         f["profile_key"] = profile_key_for_field(f) or link_key(f["label"])
+        if (ek := experience_key(f["label"], f.get("hint", "") or f.get("placeholder", ""))) and f["kind"] != "file":
+            f["profile_key"] = ek                                       # which kind of experience is being asked?
+            f["exp_unit"] = unit_of(f["label"], f.get("hint", "") + " " + f.get("placeholder", ""))
         if f["kind"] == "text":                                       # text boxes that are really dates
             hint = f.get("placeholder", "") or f.get("hint", "")
             if date_format_from_hint(hint) or (DATE_WORD.search(f["label"]) and not f["profile_key"]):

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 class StartSession(BaseModel):
     url: str = Field(max_length=2048)
-    resume_id: str | None = None
+    resume_id: str | None = None                            # a resume id, or "auto" = best match for the job
     notes: str = Field("", max_length=2000)                 # job-specific emphasis for AI-written answers
     show_browser: bool | None = None                        # None = use my settings
     ai_answers: Literal["auto", "ask"] | None = None
