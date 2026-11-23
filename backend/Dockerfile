@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install Python and Linux dependencies
+# Install Python and Chromium system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-venv \
@@ -37,27 +37,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create Python environment
+# Python virtual environment
 RUN python3 -m venv /opt/venv
 
-# Install backend requirements
-COPY backend/requirements.txt ./requirements.txt
+# Install Python requirements
+COPY requirements.txt ./requirements.txt
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
 # Install GitHub Copilot CLI
-RUN npm install --global @github/copilot
+RUN npm install -g @github/copilot
 
-# Install Playwright Chromium and system dependencies
+# Install Playwright Chromium
 RUN python -m playwright install --with-deps chromium
 
-# Copy backend application only
-COPY backend/ ./
+# Copy backend source code
+COPY . ./
 
 RUN mkdir -p /app/storage && chmod 755 /app/storage
 
 EXPOSE 10000
-
 
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
